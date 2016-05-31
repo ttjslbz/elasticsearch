@@ -33,12 +33,10 @@ import java.util.Map;
  */
 public class DiscoveryNodeFilters {
 
-    public static enum OpType {
+    public enum OpType {
         AND,
         OR
     }
-
-    ;
 
     public static DiscoveryNodeFilters buildFromSettings(OpType opType, String prefix, Settings settings) {
         return buildFromKeyValue(opType, settings.getByPrefix(prefix).getAsMap());
@@ -180,7 +178,7 @@ public class DiscoveryNodeFilters {
                     }
                 }
             } else {
-                String nodeAttributeValue = node.attributes().get(attr);
+                String nodeAttributeValue = node.getAttributes().get(attr);
                 if (nodeAttributeValue == null) {
                     if (opType == OpType.AND) {
                         return false;

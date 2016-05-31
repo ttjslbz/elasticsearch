@@ -43,7 +43,7 @@ import org.elasticsearch.cluster.routing.allocation.decider.FilterAllocationDeci
 import org.elasticsearch.cluster.routing.allocation.decider.ShardsLimitAllocationDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.SnapshotInProgressAllocationDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.ThrottlingAllocationDecider;
-import org.elasticsearch.cluster.service.InternalClusterService;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.logging.ESLoggerFactory;
 import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.network.NetworkService;
@@ -255,7 +255,7 @@ public final class ClusterSettings extends AbstractScopedSettings {
                     HierarchyCircuitBreakerService.FIELDDATA_CIRCUIT_BREAKER_OVERHEAD_SETTING,
                     HierarchyCircuitBreakerService.REQUEST_CIRCUIT_BREAKER_LIMIT_SETTING,
                     HierarchyCircuitBreakerService.REQUEST_CIRCUIT_BREAKER_OVERHEAD_SETTING,
-                    InternalClusterService.CLUSTER_SERVICE_SLOW_TASK_LOGGING_THRESHOLD_SETTING,
+                    ClusterService.CLUSTER_SERVICE_SLOW_TASK_LOGGING_THRESHOLD_SETTING,
                     SearchService.DEFAULT_SEARCH_TIMEOUT_SETTING,
                     ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING,
                     TransportService.TRACE_LOG_EXCLUDE_SETTING,
@@ -344,16 +344,14 @@ public final class ClusterSettings extends AbstractScopedSettings {
                     ZenDiscovery.JOIN_RETRY_DELAY_SETTING,
                     ZenDiscovery.MAX_PINGS_FROM_ANOTHER_MASTER_SETTING,
                     ZenDiscovery.SEND_LEAVE_REQUEST_SETTING,
-                    ZenDiscovery.MASTER_ELECTION_FILTER_CLIENT_SETTING,
                     ZenDiscovery.MASTER_ELECTION_WAIT_FOR_JOINS_TIMEOUT_SETTING,
-                    ZenDiscovery.MASTER_ELECTION_FILTER_DATA_SETTING,
+                    ZenDiscovery.MASTER_ELECTION_IGNORE_NON_MASTER_PINGS_SETTING,
                     UnicastZenPing.DISCOVERY_ZEN_PING_UNICAST_HOSTS_SETTING,
                     UnicastZenPing.DISCOVERY_ZEN_PING_UNICAST_CONCURRENT_CONNECTS_SETTING,
                     SearchService.DEFAULT_KEEPALIVE_SETTING,
                     SearchService.KEEPALIVE_INTERVAL_SETTING,
                     Node.WRITE_PORTS_FIELD_SETTING,
                     Node.NODE_NAME_SETTING,
-                    Node.NODE_CLIENT_SETTING,
                     Node.NODE_DATA_SETTING,
                     Node.NODE_MASTER_SETTING,
                     Node.NODE_LOCAL_SETTING,

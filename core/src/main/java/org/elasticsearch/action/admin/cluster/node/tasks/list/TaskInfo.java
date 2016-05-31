@@ -73,7 +73,7 @@ public class TaskInfo implements Writeable<TaskInfo>, ToXContent {
     }
 
     public TaskInfo(StreamInput in) throws IOException {
-        node = DiscoveryNode.readNode(in);
+        node = new DiscoveryNode(in);
         taskId = new TaskId(node.getId(), in.readLong());
         type = in.readString();
         action = in.readString();
@@ -178,7 +178,7 @@ public class TaskInfo implements Writeable<TaskInfo>, ToXContent {
         }
         builder.dateValueField("start_time_in_millis", "start_time", startTime);
         builder.timeValueField("running_time_in_nanos", "running_time", runningTimeNanos, TimeUnit.NANOSECONDS);
-        if (parentTaskId.isSet() == false) {
+        if (parentTaskId.isSet()) {
             builder.field("parent_task_id", parentTaskId.toString());
         }
         return builder;

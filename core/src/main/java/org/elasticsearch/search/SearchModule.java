@@ -21,21 +21,13 @@ package org.elasticsearch.search;
 
 import org.apache.lucene.search.BooleanQuery;
 import org.elasticsearch.common.geo.ShapesAvailability;
-import org.elasticsearch.common.geo.builders.CircleBuilder;
-import org.elasticsearch.common.geo.builders.EnvelopeBuilder;
-import org.elasticsearch.common.geo.builders.GeometryCollectionBuilder;
-import org.elasticsearch.common.geo.builders.LineStringBuilder;
-import org.elasticsearch.common.geo.builders.MultiLineStringBuilder;
-import org.elasticsearch.common.geo.builders.MultiPointBuilder;
-import org.elasticsearch.common.geo.builders.MultiPolygonBuilder;
-import org.elasticsearch.common.geo.builders.PointBuilder;
-import org.elasticsearch.common.geo.builders.PolygonBuilder;
-import org.elasticsearch.common.geo.builders.ShapeBuilder;
+import org.elasticsearch.common.geo.builders.ShapeBuilders;
 import org.elasticsearch.common.inject.AbstractModule;
 import org.elasticsearch.common.inject.multibindings.Multibinder;
 import org.elasticsearch.common.io.stream.NamedWriteable;
 import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.index.percolator.PercolatorHighlightSubFetchPhase;
 import org.elasticsearch.index.query.BoolQueryParser;
 import org.elasticsearch.index.query.BoostingQueryParser;
 import org.elasticsearch.index.query.CommonTermsQueryParser;
@@ -62,6 +54,7 @@ import org.elasticsearch.index.query.MoreLikeThisQueryParser;
 import org.elasticsearch.index.query.MultiMatchQueryParser;
 import org.elasticsearch.index.query.NestedQueryParser;
 import org.elasticsearch.index.query.ParentIdQueryParser;
+import org.elasticsearch.index.query.PercolatorQueryParser;
 import org.elasticsearch.index.query.PrefixQueryParser;
 import org.elasticsearch.index.query.QueryBuilder;
 import org.elasticsearch.index.query.QueryParser;
@@ -224,6 +217,11 @@ import org.elasticsearch.search.highlight.Highlighters;
 import org.elasticsearch.search.query.QueryPhase;
 import org.elasticsearch.search.rescore.QueryRescorerBuilder;
 import org.elasticsearch.search.rescore.RescoreBuilder;
+import org.elasticsearch.search.sort.FieldSortBuilder;
+import org.elasticsearch.search.sort.GeoDistanceSortBuilder;
+import org.elasticsearch.search.sort.ScoreSortBuilder;
+import org.elasticsearch.search.sort.ScriptSortBuilder;
+import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.search.suggest.Suggester;
 import org.elasticsearch.search.suggest.Suggesters;
 import org.elasticsearch.search.suggest.SuggestionBuilder;
@@ -251,7 +249,7 @@ public class SearchModule extends AbstractModule {
     private final Set<Aggregator.Parser> aggParsers = new HashSet<>();
     private final Set<PipelineAggregator.Parser> pipelineAggParsers = new HashSet<>();
     private final Highlighters highlighters = new Highlighters();
-    private final Suggesters suggesters = new Suggesters();
+    private final Suggesters suggesters;
     /**
      * Function score parsers constructed on registration. This is ok because
      * they don't have any dependencies.
@@ -276,9 +274,12 @@ public class SearchModule extends AbstractModule {
     public SearchModule(Settings settings, NamedWriteableRegistry namedWriteableRegistry) {
         this.settings = settings;
         this.namedWriteableRegistry = namedWriteableRegistry;
+        suggesters = new Suggesters(namedWriteableRegistry);
 
         registerBuiltinFunctionScoreParsers();
         registerBuiltinQueryParsers();
+        registerBuiltinRescorers();
+        registerBuiltinSorts();
     }
 
     public void registerHighlighter(String key, Class<? extends Highlighter> clazz) {
@@ -286,8 +287,7 @@ public class SearchModule extends AbstractModule {
     }
 
     public void registerSuggester(String key, Suggester<?> suggester) {
-        suggesters.registerExtension(key, suggester.getClass());
-        namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, suggester.getBuilderPrototype());
+        suggesters.register(key, suggester);
     }
 
     /**
@@ -337,13 +337,12 @@ public class SearchModule extends AbstractModule {
     protected void configure() {
         IndicesQueriesRegistry indicesQueriesRegistry = buildQueryParserRegistry();
         bind(IndicesQueriesRegistry.class).toInstance(indicesQueriesRegistry);
+        bind(Suggesters.class).toInstance(suggesters);
         configureSearch();
         configureAggs(indicesQueriesRegistry);
         configureHighlighters();
-        configureSuggesters();
         configureFetchSubPhase();
         configureShapes();
-        configureRescorers();
     }
 
     protected void configureFetchSubPhase() {
@@ -356,6 +355,7 @@ public class SearchModule extends AbstractModule {
         fetchSubPhaseMultibinder.addBinding().to(MatchedQueriesFetchSubPhase.class);
         fetchSubPhaseMultibinder.addBinding().to(HighlightPhase.class);
         fetchSubPhaseMultibinder.addBinding().to(ParentFieldSubFetchPhase.class);
+        fetchSubPhaseMultibinder.addBinding().to(PercolatorHighlightSubFetchPhase.class);
         for (Class<? extends FetchSubPhase> clazz : fetchSubPhases) {
             fetchSubPhaseMultibinder.addBinding().to(clazz);
         }
@@ -376,16 +376,6 @@ public class SearchModule extends AbstractModule {
             namedWriteableRegistry.registerPrototype(QueryBuilder.class, qb);
         }
         return new IndicesQueriesRegistry(settings, queryParsersMap);
-    }
-
-    protected void configureSuggesters() {
-        suggesters.bind(binder());
-        namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, TermSuggestionBuilder.PROTOTYPE);
-        namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, PhraseSuggestionBuilder.PROTOTYPE);
-        namedWriteableRegistry.registerPrototype(SuggestionBuilder.class, CompletionSuggestionBuilder.PROTOTYPE);
-        namedWriteableRegistry.registerPrototype(SmoothingModel.class, Laplace.PROTOTYPE);
-        namedWriteableRegistry.registerPrototype(SmoothingModel.class, LinearInterpolation.PROTOTYPE);
-        namedWriteableRegistry.registerPrototype(SmoothingModel.class, StupidBackoff.PROTOTYPE);
     }
 
     protected void configureHighlighters() {
@@ -470,20 +460,19 @@ public class SearchModule extends AbstractModule {
 
     private void configureShapes() {
         if (ShapesAvailability.JTS_AVAILABLE && ShapesAvailability.SPATIAL4J_AVAILABLE) {
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, PointBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, CircleBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, EnvelopeBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, MultiPointBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, LineStringBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, MultiLineStringBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, PolygonBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, MultiPolygonBuilder.PROTOTYPE);
-            namedWriteableRegistry.registerPrototype(ShapeBuilder.class, GeometryCollectionBuilder.PROTOTYPE);
+            ShapeBuilders.register(namedWriteableRegistry);
         }
     }
 
-    private void configureRescorers() {
-        namedWriteableRegistry.registerPrototype(RescoreBuilder.class, QueryRescorerBuilder.PROTOTYPE);
+    private void registerBuiltinRescorers() {
+        namedWriteableRegistry.register(RescoreBuilder.class, QueryRescorerBuilder.NAME, QueryRescorerBuilder::new);
+    }
+
+    private void registerBuiltinSorts() {
+        namedWriteableRegistry.register(SortBuilder.class, GeoDistanceSortBuilder.NAME, GeoDistanceSortBuilder::new);
+        namedWriteableRegistry.register(SortBuilder.class, ScoreSortBuilder.NAME, ScoreSortBuilder::new);
+        namedWriteableRegistry.register(SortBuilder.class, ScriptSortBuilder.NAME, ScriptSortBuilder::new);
+        namedWriteableRegistry.register(SortBuilder.class, FieldSortBuilder.NAME, FieldSortBuilder::new);
     }
 
     private void registerBuiltinFunctionScoreParsers() {
@@ -546,6 +535,7 @@ public class SearchModule extends AbstractModule {
         registerQueryParser(ExistsQueryParser::new);
         registerQueryParser(MatchNoneQueryParser::new);
         registerQueryParser(ParentIdQueryParser::new);
+        registerQueryParser(PercolatorQueryParser::new);
         if (ShapesAvailability.JTS_AVAILABLE && ShapesAvailability.SPATIAL4J_AVAILABLE) {
             registerQueryParser(GeoShapeQueryParser::new);
         }
@@ -614,5 +604,9 @@ public class SearchModule extends AbstractModule {
         BucketScriptPipelineAggregator.registerStreams();
         BucketSelectorPipelineAggregator.registerStreams();
         SerialDiffPipelineAggregator.registerStreams();
+    }
+
+    public Suggesters getSuggesters() {
+        return suggesters;
     }
 }

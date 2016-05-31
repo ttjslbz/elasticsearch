@@ -22,6 +22,25 @@ can be replaced with
 client.prepareSearch(indices).setSource(new SearchSourceBuilder().size(0).query(query)).get();
 -----
 
+==== Suggest api has been removed
+
+The suggest api has been removed from the Java api, use the suggest option in search api, it has been optimized
+for suggest-only request.
+
+The following call
+
+[source,java]
+-----
+client.prepareSuggest(indices).addSuggestion("foo", SuggestBuilders.completionSuggestion("field").text("s")).get();
+-----
+
+can be replaced with
+
+[source,java]
+-----
+client.prepareSearch(indices).suggest(new SuggestBuilder().addSuggestion("foo", SuggestBuilders.completionSuggestion("field").text("s"))).get();
+-----
+
 ==== Elasticsearch will no longer detect logging implementations
 
 Elasticsearch now logs only to log4j 1.2. Previously if log4j wasn't on the
@@ -225,3 +244,63 @@ The `addSuggestion` method now required the user specified suggestion name, prev
 ===== SuggestionBuilder
 
 The `field` setter has been deleted. Instead the field name needs to be specified as constructor argument.
+
+==== SearchSourceBuilder
+
+All methods which take an `XContentBuilder`, `BytesReference` `Map<String, Object>` or `bytes[]` have been removed in favor of providing the
+relevant builder object for that feature (e.g. `HighlightBuilder`, `AggregationBuilder`, `SuggestBuilder`) . This means that all search requests
+can now be validated at call time which results in much clearer errors.
+
+The `defaultResourceWindowSize(int)` method has been removed. The window size should be set explicitly on all `RescoreBuilder` objects.
+
+==== SearchRequestBuilder
+
+All methods which take an `XContentBuilder`, `BytesReference` `Map<String, Object>` or `bytes[]` have been removed in favor of providing the
+relevant builder object for that feature (e.g. `HighlightBuilder`, `AggregationBuilder`, `SuggestBuilder`) . This means that all search requests
+can now be validated at call time which results in much clearer errors.
+
+All highlighter methods have been removed in favor of a single `highlighter(HighlightBuilder)` method.
+
+The `setExtraSource(SearchSourceBuilder)` method has been removed.
+
+The `setTemplateSource(String)` and `setTemplateSource(BytesReference)` methods have been removed. Use `setTemplate(Template)` instead.
+
+`setRescorer(Rescorer)` and `setRescorer(Rescorer, int)` have been removed infavor of `setRescorer(RescoreBuilder)` and `setRescorer(RescoreBuilder, int)`
+
+==== SearchRequest
+
+All `template` methods have been removed in favor of a single `template(Template)` method.
+
+All `source` methods have been removed in favor of a single `source(SearchSourceBuilder)` method. This means that all search requests can now be validated
+at call time which results in much clearer errors.
+
+All `extraSource` methods have been removed.
+
+==== AggregationBuilder
+
+All methods which take an `XContentBuilder`, `BytesReference` `Map<String, Object>` or `bytes[]` have been removed in favor of providing the
+relevant builder object (i.e. `subAggregation(AggregationBuilder)` or `subAggregation(PipelineAggregationBuilder)`). This means that all
+requests can now be validated at call time which results in much clearer errors.
+
+==== ValidateQueryRequest
+
+`source(QuerySourceBuilder)`, `source(Map)`, `source(XContentBuilder)`, `source(String)`, `source(byte[])`, `source(byte[], int, int)`,
+`source(BytesReference)` and `source()` have been removed in favor of using `query(QueryBuilder<?>)` and `query()`
+
+==== ValidateQueryRequestBuilder
+
+`setSource()` methods have been removed in favor of using `setQuery(QueryBuilder<?>)`
+
+==== ExplainRequest
+
+`source(QuerySourceBuilder)`, `source(Map)`, `source(BytesReference)` and `source()` have been removed in favor of using
+`query(QueryBuilder<?>)` and `query()`
+
+==== ExplainRequestBuilder
+
+The `setQuery(BytesReference)` method have been removed in favor of using `setQuery(QueryBuilder<?>)`
+
+=== ClusterStatsResponse
+
+Removed the `getMemoryAvailable` method from `OsStats`, which could be previously accessed calling
+`clusterStatsResponse.getNodesStats().getOs().getMemoryAvailable()`.

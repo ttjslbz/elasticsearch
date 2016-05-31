@@ -19,16 +19,23 @@ x * Licensed to Elasticsearch under one or more contributor
 
 package org.elasticsearch.search.sort;
 
+import org.apache.lucene.search.SortField;
+import org.elasticsearch.index.query.QueryParseContext;
+
 import java.io.IOException;
 
 public class FieldSortBuilderTests extends AbstractSortTestCase<FieldSortBuilder> {
 
     @Override
     protected FieldSortBuilder createTestItem() {
-        String fieldName = randomAsciiOfLengthBetween(1, 10);
+        return randomFieldSortBuilder();
+    }
+
+    public static FieldSortBuilder randomFieldSortBuilder() {
+        String fieldName = rarely() ? FieldSortBuilder.DOC_FIELD_NAME : randomAsciiOfLengthBetween(1, 10);
         FieldSortBuilder builder = new FieldSortBuilder(fieldName);
         if (randomBoolean()) {
-            builder.order(RandomSortDataGenerator.order(builder.order()));
+            builder.order(RandomSortDataGenerator.order(null));
         }
 
         if (randomBoolean()) {
@@ -50,7 +57,7 @@ public class FieldSortBuilderTests extends AbstractSortTestCase<FieldSortBuilder
         if (randomBoolean()) {
             builder.setNestedPath(RandomSortDataGenerator.randomAscii(builder.getNestedPath()));
         }
-        
+
         return builder;
     }
 
@@ -81,5 +88,25 @@ public class FieldSortBuilderTests extends AbstractSortTestCase<FieldSortBuilder
             throw new IllegalStateException("Unsupported mutation.");
         }
         return mutated;
+    }
+
+    @Override
+    protected void sortFieldAssertions(FieldSortBuilder builder, SortField sortField) throws IOException {
+        SortField.Type expectedType;
+        if (builder.getFieldName().equals(FieldSortBuilder.DOC_FIELD_NAME)) {
+            expectedType = SortField.Type.DOC;
+        } else {
+            expectedType = SortField.Type.CUSTOM;
+        }
+        assertEquals(expectedType, sortField.getType());
+        assertEquals(builder.order() == SortOrder.ASC ? false : true, sortField.getReverse());
+        if (expectedType == SortField.Type.CUSTOM) {
+            assertEquals(builder.getFieldName(), sortField.getField());
+        }
+    }
+
+    @Override
+    protected FieldSortBuilder fromXContent(QueryParseContext context, String fieldName) throws IOException {
+        return FieldSortBuilder.fromXContent(context, fieldName);
     }
 }

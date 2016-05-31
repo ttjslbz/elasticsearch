@@ -376,23 +376,29 @@ public class DiscoveryNodes extends AbstractDiffable<DiscoveryNodes> implements 
                     if (index != -1) {
                         String matchAttrName = nodeId.substring(0, index);
                         String matchAttrValue = nodeId.substring(index + 1);
-                        if ("data".equals(matchAttrName)) {
+                        if (DiscoveryNode.Role.DATA.getRoleName().equals(matchAttrName)) {
                             if (Booleans.parseBoolean(matchAttrValue, true)) {
                                 resolvedNodesIds.addAll(dataNodes.keys());
                             } else {
                                 resolvedNodesIds.removeAll(dataNodes.keys());
                             }
-                        } else if ("master".equals(matchAttrName)) {
+                        } else if (DiscoveryNode.Role.MASTER.getRoleName().equals(matchAttrName)) {
                             if (Booleans.parseBoolean(matchAttrValue, true)) {
                                 resolvedNodesIds.addAll(masterNodes.keys());
                             } else {
                                 resolvedNodesIds.removeAll(masterNodes.keys());
                             }
+                        } else if (DiscoveryNode.Role.INGEST.getRoleName().equals(matchAttrName)) {
+                            if (Booleans.parseBoolean(matchAttrValue, true)) {
+                                resolvedNodesIds.addAll(ingestNodes.keys());
+                            } else {
+                                resolvedNodesIds.removeAll(ingestNodes.keys());
+                            }
                         } else {
                             for (DiscoveryNode node : this) {
-                                for (ObjectObjectCursor<String, String> entry : node.attributes()) {
-                                    String attrName = entry.key;
-                                    String attrValue = entry.value;
+                                for (Map.Entry<String, String> entry : node.getAttributes().entrySet()) {
+                                    String attrName = entry.getKey();
+                                    String attrValue = entry.getValue();
                                     if (Regex.simpleMatch(matchAttrName, attrName) && Regex.simpleMatch(matchAttrValue, attrValue)) {
                                         resolvedNodesIds.add(node.id());
                                     }
@@ -593,7 +599,7 @@ public class DiscoveryNodes extends AbstractDiffable<DiscoveryNodes> implements 
         }
     }
 
-    public DiscoveryNodes readFrom(StreamInput in, DiscoveryNode localNode) throws IOException {
+    private DiscoveryNodes readFrom(StreamInput in, DiscoveryNode localNode) throws IOException {
         Builder builder = new Builder();
         if (in.readBoolean()) {
             builder.masterNodeId(in.readString());
@@ -603,7 +609,7 @@ public class DiscoveryNodes extends AbstractDiffable<DiscoveryNodes> implements 
         }
         int size = in.readVInt();
         for (int i = 0; i < size; i++) {
-            DiscoveryNode node = DiscoveryNode.readNode(in);
+            DiscoveryNode node = new DiscoveryNode(in);
             if (localNode != null && node.id().equals(localNode.id())) {
                 // reuse the same instance of our address and local node id for faster equality
                 node = localNode;

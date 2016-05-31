@@ -19,8 +19,6 @@
 
 package org.elasticsearch.action.admin.cluster.node.tasks.list;
 
-import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
-
 import org.elasticsearch.action.FailedNodeException;
 import org.elasticsearch.action.TaskOperationFailure;
 import org.elasticsearch.action.support.tasks.BaseTasksResponse;
@@ -131,10 +129,16 @@ public class ListTasksResponse extends BaseTasksResponse implements ToXContent {
             builder.field("host", node.getHostName());
             builder.field("ip", node.getAddress());
 
-            if (!node.attributes().isEmpty()) {
+            builder.startArray("roles");
+            for (DiscoveryNode.Role role : node.getRoles()) {
+                builder.value(role.getRoleName());
+            }
+            builder.endArray();
+
+            if (!node.getAttributes().isEmpty()) {
                 builder.startObject("attributes");
-                for (ObjectObjectCursor<String, String> attr : node.attributes()) {
-                    builder.field(attr.key, attr.value, XContentBuilder.FieldCaseConversion.NONE);
+                for (Map.Entry<String, String> attrEntry : node.getAttributes().entrySet()) {
+                    builder.field(attrEntry.getKey(), attrEntry.getValue(), XContentBuilder.FieldCaseConversion.NONE);
                 }
                 builder.endObject();
             }

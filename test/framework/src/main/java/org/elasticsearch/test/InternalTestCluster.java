@@ -30,11 +30,11 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.cluster.node.stats.NodeStats;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
+import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags.Flag;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.transport.TransportClient;
 import org.elasticsearch.cluster.ClusterName;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.action.index.MappingUpdatedAction;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
@@ -45,6 +45,7 @@ import org.elasticsearch.cluster.routing.OperationRouting;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.allocation.decider.DiskThresholdDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.ThrottlingAllocationDecider;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.breaker.CircuitBreaker;
@@ -66,7 +67,6 @@ import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.NodeEnvironment;
 import org.elasticsearch.http.HttpServerTransport;
 import org.elasticsearch.index.Index;
-import org.elasticsearch.index.IndexModule;
 import org.elasticsearch.index.IndexService;
 import org.elasticsearch.index.engine.CommitStats;
 import org.elasticsearch.index.engine.Engine;
@@ -200,9 +200,9 @@ public final class InternalTestCluster extends TestCluster {
      * fully shared cluster to be more reproducible */
     private final long[] sharedNodesSeeds;
 
-    private final int numSharedDataNodes;
+    private final int numSharedAllRolesNodes;
 
-    private final int numSharedClientNodes;
+    private final int numShareCoordOnlyNodes;
 
     private final NodeConfigurationSource nodeConfigurationSource;
 
@@ -241,20 +241,20 @@ public final class InternalTestCluster extends TestCluster {
 
         Random random = new Random(clusterSeed);
 
-        this.numSharedDataNodes = RandomInts.randomIntBetween(random, minNumDataNodes, maxNumDataNodes);
-        assert this.numSharedDataNodes >= 0;
+        this.numSharedAllRolesNodes = RandomInts.randomIntBetween(random, minNumDataNodes, maxNumDataNodes);
+        assert this.numSharedAllRolesNodes >= 0;
 
         //for now all shared data nodes are also master eligible
-        if (numSharedDataNodes == 0) {
-            this.numSharedClientNodes = 0;
+        if (numSharedAllRolesNodes == 0) {
+            this.numShareCoordOnlyNodes = 0;
         } else {
             if (numClientNodes < 0) {
-                this.numSharedClientNodes = RandomInts.randomIntBetween(random, DEFAULT_MIN_NUM_CLIENT_NODES, DEFAULT_MAX_NUM_CLIENT_NODES);
+                this.numShareCoordOnlyNodes = RandomInts.randomIntBetween(random, DEFAULT_MIN_NUM_CLIENT_NODES, DEFAULT_MAX_NUM_CLIENT_NODES);
             } else {
-                this.numSharedClientNodes = numClientNodes;
+                this.numShareCoordOnlyNodes = numClientNodes;
             }
         }
-        assert this.numSharedClientNodes >= 0;
+        assert this.numShareCoordOnlyNodes >= 0;
 
         this.nodePrefix = nodePrefix;
 
@@ -268,12 +268,12 @@ public final class InternalTestCluster extends TestCluster {
          *  - we could add a flag that never returns a client to the master
          *  - along those lines use a dedicated node that is master eligible and let all other nodes be only data nodes
          */
-        sharedNodesSeeds = new long[numSharedDataNodes + numSharedClientNodes];
+        sharedNodesSeeds = new long[numSharedAllRolesNodes + numShareCoordOnlyNodes];
         for (int i = 0; i < sharedNodesSeeds.length; i++) {
             sharedNodesSeeds[i] = random.nextLong();
         }
 
-        logger.info("Setup InternalTestCluster [{}] with seed [{}] using [{}] data nodes and [{}] client nodes", clusterName, SeedUtils.formatSeed(clusterSeed), numSharedDataNodes, numSharedClientNodes);
+        logger.info("Setup InternalTestCluster [{}] with seed [{}] using [{}] data nodes and [{}] client nodes", clusterName, SeedUtils.formatSeed(clusterSeed), numSharedAllRolesNodes, numShareCoordOnlyNodes);
         this.nodeConfigurationSource = nodeConfigurationSource;
         Builder builder = Settings.settingsBuilder();
         if (random.nextInt(5) == 0) { // sometimes set this
@@ -541,7 +541,7 @@ public final class InternalTestCluster extends TestCluster {
                 n == 0 ? nodes.values().stream() : nodes.values().stream().filter(new DataNodePredicate().and(new MasterNodePredicate(getMasterName()).negate()));
         final Iterator<NodeAndClient> values = collection.iterator();
 
-        logger.info("changing cluster size from {} to {}, {} data nodes", size(), n + numSharedClientNodes, n);
+        logger.info("changing cluster size from {} to {}, {} data nodes", size(), n + numShareCoordOnlyNodes, n);
         Set<NodeAndClient> nodesToRemove = new HashSet<>();
         int numNodesAndClients = 0;
         while (values.hasNext() && numNodesAndClients++ < size-n) {
@@ -641,23 +641,24 @@ public final class InternalTestCluster extends TestCluster {
     }
 
     /**
-     * Returns a client to a node started with "node.client: true"
+     * Returns a client to a coordinating only node
      */
-    public synchronized Client clientNodeClient() {
+    public synchronized Client coordOnlyNodeClient() {
         ensureOpen();
-        NodeAndClient randomNodeAndClient = getRandomNodeAndClient(new ClientNodePredicate());
+        NodeAndClient randomNodeAndClient = getRandomNodeAndClient(new NoDataNoMasterNodePredicate());
         if (randomNodeAndClient != null) {
             return randomNodeAndClient.client(random);
         }
         int nodeId = nextNodeId.getAndIncrement();
         Settings settings = getSettings(nodeId, random.nextLong(), Settings.EMPTY);
-        startNodeClient(settings);
-        return getRandomNodeAndClient(new ClientNodePredicate()).client(random);
+        startCoordinatingOnlyNode(settings);
+        return getRandomNodeAndClient(new NoDataNoMasterNodePredicate()).client(random);
     }
 
-    public synchronized Client startNodeClient(Settings settings) {
+    public synchronized Client startCoordinatingOnlyNode(Settings settings) {
         ensureOpen(); // currently unused
-        Builder builder = settingsBuilder().put(settings).put(Node.NODE_CLIENT_SETTING.getKey(), true);
+        Builder builder = settingsBuilder().put(settings).put(Node.NODE_MASTER_SETTING.getKey(), false)
+            .put(Node.NODE_DATA_SETTING.getKey(), false).put(Node.NODE_INGEST_SETTING.getKey(), false);
         if (size() == 0) {
             // if we are the first node - don't wait for a state
             builder.put(DiscoverySettings.INITIAL_STATE_TIMEOUT_SETTING.getKey(), 0);
@@ -923,9 +924,9 @@ public final class InternalTestCluster extends TestCluster {
 
 
         Set<NodeAndClient> sharedNodes = new HashSet<>();
-        assert sharedNodesSeeds.length == numSharedDataNodes + numSharedClientNodes;
+        assert sharedNodesSeeds.length == numSharedAllRolesNodes + numShareCoordOnlyNodes;
         boolean changed = false;
-        for (int i = 0; i < numSharedDataNodes; i++) {
+        for (int i = 0; i < numSharedAllRolesNodes; i++) {
             String buildNodeName = buildNodeName(i);
             NodeAndClient nodeAndClient = nodes.get(buildNodeName);
             if (nodeAndClient == null) {
@@ -936,12 +937,13 @@ public final class InternalTestCluster extends TestCluster {
             }
             sharedNodes.add(nodeAndClient);
         }
-        for (int i = numSharedDataNodes; i < numSharedDataNodes + numSharedClientNodes; i++) {
+        for (int i = numSharedAllRolesNodes; i < numSharedAllRolesNodes + numShareCoordOnlyNodes; i++) {
             String buildNodeName = buildNodeName(i);
             NodeAndClient nodeAndClient = nodes.get(buildNodeName);
             if (nodeAndClient == null) {
                 changed = true;
-                Builder clientSettingsBuilder = Settings.builder().put(Node.NODE_CLIENT_SETTING.getKey(), true);
+                Builder clientSettingsBuilder = Settings.builder().put(Node.NODE_MASTER_SETTING.getKey(), false)
+                    .put(Node.NODE_DATA_SETTING.getKey(), false).put(Node.NODE_INGEST_SETTING.getKey(), false);
                 nodeAndClient = buildNode(i, sharedNodesSeeds[i], clientSettingsBuilder.build(), Version.CURRENT);
                 nodeAndClient.node.start();
                 logger.info("Start Shared Node [{}] not shared", nodeAndClient.name);
@@ -1666,10 +1668,11 @@ public final class InternalTestCluster extends TestCluster {
         }
     }
 
-    private static final class ClientNodePredicate implements Predicate<NodeAndClient> {
+    private static final class NoDataNoMasterNodePredicate implements Predicate<NodeAndClient> {
         @Override
         public boolean test(NodeAndClient nodeAndClient) {
-            return DiscoveryNode.clientNode(nodeAndClient.node.settings());
+            return DiscoveryNode.masterNode(nodeAndClient.node.settings()) == false &&
+                DiscoveryNode.dataNode(nodeAndClient.node.settings()) == false;
         }
     }
 
@@ -1838,7 +1841,8 @@ public final class InternalTestCluster extends TestCluster {
                 }
 
                 NodeService nodeService = getInstanceFromNode(NodeService.class, nodeAndClient.node);
-                NodeStats stats = nodeService.stats(CommonStatsFlags.ALL, false, false, false, false, false, false, false, false, false, false, false);
+                CommonStatsFlags flags = new CommonStatsFlags(Flag.FieldData, Flag.QueryCache, Flag.Segments);
+                NodeStats stats = nodeService.stats(flags, false, false, false, false, false, false, false, false, false, false, false);
                 assertThat("Fielddata size must be 0 on node: " + stats.getNode(), stats.getIndices().getFieldData().getMemorySizeInBytes(), equalTo(0L));
                 assertThat("Query cache size must be 0 on node: " + stats.getNode(), stats.getIndices().getQueryCache().getMemorySizeInBytes(), equalTo(0L));
                 assertThat("FixedBitSet cache size must be 0 on node: " + stats.getNode(), stats.getIndices().getSegments().getBitsetMemoryInBytes(), equalTo(0L));

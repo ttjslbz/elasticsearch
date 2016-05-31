@@ -20,12 +20,15 @@
 package org.elasticsearch.search.sort;
 
 
+import org.apache.lucene.search.SortField;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.unit.DistanceUnit;
 import org.elasticsearch.common.xcontent.XContentHelper;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.mapper.MappedFieldType;
+import org.elasticsearch.index.mapper.geo.GeoPointFieldMapper;
 import org.elasticsearch.index.query.QueryParseContext;
 import org.elasticsearch.test.geo.RandomGeoGenerator;
 
@@ -36,6 +39,10 @@ public class GeoDistanceSortBuilderTests extends AbstractSortTestCase<GeoDistanc
 
     @Override
     protected GeoDistanceSortBuilder createTestItem() {
+        return randomGeoDistanceSortBuilder();
+    }
+
+    public static GeoDistanceSortBuilder randomGeoDistanceSortBuilder() {
         String fieldName = randomAsciiOfLengthBetween(1, 10);
         GeoDistanceSortBuilder result = null;
 
@@ -68,7 +75,7 @@ public class GeoDistanceSortBuilderTests extends AbstractSortTestCase<GeoDistanc
             result.unit(unit(result.unit()));
         }
         if (randomBoolean()) {
-            result.order(RandomSortDataGenerator.order(result.order()));
+            result.order(RandomSortDataGenerator.order(null));
         }
         if (randomBoolean()) {
             result.sortMode(mode(result.sortMode()));
@@ -87,6 +94,13 @@ public class GeoDistanceSortBuilderTests extends AbstractSortTestCase<GeoDistanc
         }
 
         return result;
+    }
+
+    @Override
+    protected MappedFieldType provideMappedFieldType(String name) {
+        MappedFieldType clone = GeoPointFieldMapper.Defaults.FIELD_TYPE.clone();
+        clone.setName(name);
+        return clone;
     }
 
     private static SortMode mode(SortMode original) {
@@ -167,7 +181,13 @@ public class GeoDistanceSortBuilderTests extends AbstractSortTestCase<GeoDistanc
             break;
         }
         return result;
+    }
 
+    @Override
+    protected void sortFieldAssertions(GeoDistanceSortBuilder builder, SortField sortField) throws IOException {
+        assertEquals(SortField.Type.CUSTOM, sortField.getType());
+        assertEquals(builder.order() == SortOrder.ASC ? false : true, sortField.getReverse());
+        assertEquals(builder.fieldName(), sortField.getField());
     }
 
     public void testSortModeSumIsRejectedInSetter() {
@@ -201,12 +221,8 @@ public class GeoDistanceSortBuilderTests extends AbstractSortTestCase<GeoDistanc
         QueryParseContext context = new QueryParseContext(indicesQueriesRegistry);
         context.reset(itemParser);
 
-        try {
-          GeoDistanceSortBuilder.PROTOTYPE.fromXContent(context, "");
-          fail("sort mode sum should not be supported");
-        } catch (IllegalArgumentException e) {
-            // all good
-        }
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> GeoDistanceSortBuilder.fromXContent(context, ""));
+        assertEquals("sort_mode [sum] isn't supported for sorting by geo distance", e.getMessage());
     }
 
     public void testGeoDistanceSortCanBeParsedFromGeoHash() throws IOException {
@@ -233,12 +249,17 @@ public class GeoDistanceSortBuilderTests extends AbstractSortTestCase<GeoDistanc
         QueryParseContext context = new QueryParseContext(indicesQueriesRegistry);
         context.reset(itemParser);
 
-        GeoDistanceSortBuilder result = GeoDistanceSortBuilder.PROTOTYPE.fromXContent(context, json);
+        GeoDistanceSortBuilder result = GeoDistanceSortBuilder.fromXContent(context, json);
         assertEquals("[-19.700583312660456, -2.8225036337971687, "
                 + "31.537466906011105, -74.63590376079082, "
                 + "43.71844606474042, -5.548660643398762, "
                 + "-37.20467280596495, 38.71751043945551, "
                 + "-69.44606635719538, 84.25200328230858, "
                 + "-39.03717711567879, 44.74099852144718]", Arrays.toString(result.points()));
+    }
+
+    @Override
+    protected GeoDistanceSortBuilder fromXContent(QueryParseContext context, String fieldName) throws IOException {
+        return GeoDistanceSortBuilder.fromXContent(context, fieldName);
     }
 }

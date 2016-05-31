@@ -20,13 +20,13 @@
 package org.elasticsearch.search;
 
 import com.carrotsearch.hppc.ObjectFloatHashMap;
-
 import org.apache.lucene.search.FieldDoc;
+import org.apache.lucene.search.Sort;
 import org.apache.lucene.search.TopDocs;
 import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.cache.recycler.PageCacheRecycler;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -42,7 +42,6 @@ import org.elasticsearch.common.util.BigArrays;
 import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
 import org.elasticsearch.common.util.concurrent.ConcurrentMapLong;
 import org.elasticsearch.common.util.concurrent.FutureUtils;
-import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
 import org.elasticsearch.common.xcontent.XContentLocation;
 import org.elasticsearch.common.xcontent.XContentParser;
@@ -93,6 +92,7 @@ import org.elasticsearch.search.query.QuerySearchResultProvider;
 import org.elasticsearch.search.query.ScrollQuerySearchResult;
 import org.elasticsearch.search.rescore.RescoreBuilder;
 import org.elasticsearch.search.searchafter.SearchAfterBuilder;
+import org.elasticsearch.search.sort.SortBuilder;
 import org.elasticsearch.search.suggest.Suggesters;
 import org.elasticsearch.threadpool.ThreadPool;
 
@@ -100,6 +100,7 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicLong;
@@ -550,8 +551,14 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> imp
                 indexShard, scriptService, pageCacheRecycler, bigArrays, threadPool.estimatedTimeInMillisCounter(), parseFieldMatcher,
                 defaultSearchTimeout, fetchPhase);
         context.getQueryShardContext().setFieldStatsProvider(new FieldStatsProvider(engineSearcher, indexService.mapperService()));
-        request.rewrite(context.getQueryShardContext());
         SearchContext.setCurrent(context);
+        request.rewrite(context.getQueryShardContext());
+        // reset that we have used nowInMillis from the context since it may
+        // have been rewritten so its no longer in the query and the request can
+        // be cached. If it is still present in the request (e.g. in a range
+        // aggregation) it will still be caught when the aggregation is
+        // evaluated.
+        context.resetNowInMillisUsed();
         try {
             if (request.scroll() != null) {
                 context.scrollContext(new ScrollContext());
@@ -678,33 +685,13 @@ public class SearchService extends AbstractLifecycleComponent<SearchService> imp
             context.parsedPostFilter(queryShardContext.toQuery(source.postFilter()));
         }
         if (source.sorts() != null) {
-            XContentParser completeSortParser = null;
             try {
-                XContentBuilder completeSortBuilder = XContentFactory.jsonBuilder();
-                completeSortBuilder.startObject();
-                completeSortBuilder.startArray("sort");
-                for (BytesReference sort : source.sorts()) {
-                    XContentParser parser = XContentFactory.xContent(sort).createParser(sort);
-                    parser.nextToken();
-                    completeSortBuilder.copyCurrentStructure(parser);
+                Optional<Sort> optionalSort = SortBuilder.buildSort(source.sorts(), context.getQueryShardContext());
+                if (optionalSort.isPresent()) {
+                    context.sort(optionalSort.get());
                 }
-                completeSortBuilder.endArray();
-                completeSortBuilder.endObject();
-                BytesReference completeSortBytes = completeSortBuilder.bytes();
-                completeSortParser = XContentFactory.xContent(completeSortBytes).createParser(completeSortBytes);
-                completeSortParser.nextToken();
-                completeSortParser.nextToken();
-                completeSortParser.nextToken();
-                this.elementParsers.get("sort").parse(completeSortParser, context);
-            } catch (Exception e) {
-                String sSource = "_na_";
-                try {
-                    sSource = source.toString();
-                } catch (Throwable e1) {
-                    // ignore
-                }
-                XContentLocation location = completeSortParser != null ? completeSortParser.getTokenLocation() : null;
-                throw new SearchParseException(context, "failed to parse sort source [" + sSource + "]", location, e);
+            } catch (IOException e) {
+                throw new SearchContextException(context, "failed to create sort elements", e);
             }
         }
         context.trackScores(source.trackScores());

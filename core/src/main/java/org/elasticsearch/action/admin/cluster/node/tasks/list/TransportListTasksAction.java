@@ -26,8 +26,8 @@ import org.elasticsearch.action.TaskOperationFailure;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.tasks.TransportTasksAction;
 import org.elasticsearch.cluster.ClusterName;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.settings.Settings;
@@ -84,7 +84,13 @@ public class TransportListTasksAction extends TransportTasksAction<Task, ListTas
         long timeoutTime = System.nanoTime() + timeout.nanos();
         super.processTasks(request, operation.andThen((Task t) -> {
             while (System.nanoTime() - timeoutTime < 0) {
-                if (taskManager.getTask(t.getId()) == null) {
+                Task task = taskManager.getTask(t.getId());
+                if (task == null) {
+                    return;
+                }
+                if (task.getAction().startsWith(ListTasksAction.NAME)) {
+                    // It doesn't make sense to wait for List Tasks and it can cause an infinite loop of the task waiting
+                    // for itself of one of its child tasks
                     return;
                 }
                 try {

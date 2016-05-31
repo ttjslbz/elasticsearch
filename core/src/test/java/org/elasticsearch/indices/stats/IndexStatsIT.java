@@ -61,6 +61,7 @@ import java.util.Random;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.PROTO;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
 import static org.elasticsearch.common.settings.Settings.settingsBuilder;
+import static org.elasticsearch.common.xcontent.XContentFactory.contentBuilder;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAllSuccessful;
@@ -575,6 +576,10 @@ public class IndexStatsIT extends ESIntegTestCase {
 
         IndicesStatsResponse stats = builder.execute().actionGet();
         for (Flag flag : values) {
+            if (flag == Flag.Suggest) {
+                // suggest flag is unused
+                continue;
+            }
             assertThat(isSet(flag, stats.getPrimaries()), equalTo(false));
             assertThat(isSet(flag, stats.getTotal()), equalTo(false));
         }
@@ -610,6 +615,10 @@ public class IndexStatsIT extends ESIntegTestCase {
         }
 
         for (Flag flag : EnumSet.complementOf(flags)) { // check the complement
+            if (flag == Flag.Suggest) {
+                // suggest flag is unused
+                continue;
+            }
             assertThat(isSet(flag, stats.getPrimaries()), equalTo(false));
             assertThat(isSet(flag, stats.getTotal()), equalTo(false));
         }
@@ -661,7 +670,7 @@ public class IndexStatsIT extends ESIntegTestCase {
 
     public void testFlagOrdinalOrder() {
         Flag[] flags = new Flag[]{Flag.Store, Flag.Indexing, Flag.Get, Flag.Search, Flag.Merge, Flag.Flush, Flag.Refresh,
-                Flag.QueryCache, Flag.FieldData, Flag.Docs, Flag.Warmer, Flag.Percolate, Flag.Completion, Flag.Segments,
+                Flag.QueryCache, Flag.FieldData, Flag.Docs, Flag.Warmer, Flag.PercolatorCache, Flag.Completion, Flag.Segments,
                 Flag.Translog, Flag.Suggest, Flag.RequestCache, Flag.Recovery};
 
         assertThat(flags.length, equalTo(Flag.values().length));
@@ -902,7 +911,7 @@ public class IndexStatsIT extends ESIntegTestCase {
             case Warmer:
                 builder.setWarmer(set);
                 break;
-            case Percolate:
+            case PercolatorCache:
                 builder.setPercolate(set);
                 break;
             case Completion:
@@ -914,8 +923,7 @@ public class IndexStatsIT extends ESIntegTestCase {
             case Translog:
                 builder.setTranslog(set);
                 break;
-            case Suggest:
-                builder.setSuggest(set);
+            case Suggest: // unused
                 break;
             case RequestCache:
                 builder.setRequestCache(set);
@@ -953,16 +961,16 @@ public class IndexStatsIT extends ESIntegTestCase {
                 return response.getStore() != null;
             case Warmer:
                 return response.getWarmer() != null;
-            case Percolate:
-                return response.getPercolate() != null;
+            case PercolatorCache:
+                return response.getPercolatorCache() != null;
             case Completion:
                 return response.getCompletion() != null;
             case Segments:
                 return response.getSegments() != null;
             case Translog:
                 return response.getTranslog() != null;
-            case Suggest:
-                return response.getSuggest() != null;
+            case Suggest: // unused
+                return true;
             case RequestCache:
                 return response.getRequestCache() != null;
             case Recovery:

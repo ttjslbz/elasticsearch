@@ -20,6 +20,7 @@
 package org.elasticsearch.cluster.node;
 
 import org.elasticsearch.Version;
+import org.elasticsearch.common.Booleans;
 import org.elasticsearch.common.Randomness;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.component.AbstractComponent;
@@ -28,11 +29,14 @@ import org.elasticsearch.common.settings.Setting;
 import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
+import org.elasticsearch.node.Node;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -62,22 +66,22 @@ public class DiscoveryNodeService extends AbstractComponent {
     }
 
     public DiscoveryNode buildLocalNode(TransportAddress publishAddress) {
-        Map<String, String> attributes = new HashMap<>(settings.getByPrefix("node.").getAsMap());
-        attributes.remove("name"); // name is extracted in other places
+        final String nodeId = generateNodeId(settings);
+        Map<String, String> attributes = new HashMap<>(Node.NODE_ATTRIBUTES.get(this.settings).getAsMap());
         if (attributes.containsKey("client")) {
-            if (attributes.get("client").equals("false")) {
-                attributes.remove("client"); // this is the default
-            } else {
-                // if we are client node, don't store data ...
-                attributes.put("data", "false");
-            }
-        }
-        if (attributes.containsKey("data")) {
-            if (attributes.get("data").equals("true")) {
-                attributes.remove("data");
-            }
+            throw new IllegalArgumentException("node.client setting is no longer supported, use " + Node.NODE_MASTER_SETTING.getKey()
+                    + ", " + Node.NODE_DATA_SETTING.getKey() + " and " + Node.NODE_INGEST_SETTING.getKey() + " explicitly instead");
         }
 
+        attributes.remove("name"); // name is extracted in other places
+        Set<DiscoveryNode.Role> roles = new HashSet<>();
+        for (DiscoveryNode.Role role : DiscoveryNode.Role.values()) {
+            String isRoleEnabled = attributes.remove(role.getRoleName());
+            //all existing roles default to true
+            if (isRoleEnabled == null || Booleans.parseBooleanExact(isRoleEnabled)) {
+                roles.add(role);
+            }
+        }
         for (CustomAttributesProvider provider : customAttributesProviders) {
             try {
                 Map<String, String> customAttributes = provider.buildAttributes();
@@ -92,9 +96,8 @@ public class DiscoveryNodeService extends AbstractComponent {
                 logger.warn("failed to build custom attributes from provider [{}]", e, provider);
             }
         }
-
-        final String nodeId = generateNodeId(settings);
-        return new DiscoveryNode(settings.get("node.name"), nodeId, publishAddress, attributes, version);
+        return new DiscoveryNode(Node.NODE_NAME_SETTING.get(settings), nodeId, publishAddress, attributes,
+                roles, version);
     }
 
     public interface CustomAttributesProvider {

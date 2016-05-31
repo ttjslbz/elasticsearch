@@ -33,12 +33,12 @@ import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.analysis.AnalysisService;
 import org.elasticsearch.index.mapper.Mapper.BuilderContext;
 import org.elasticsearch.index.mapper.object.ObjectMapper;
+import org.elasticsearch.index.percolator.PercolatorFieldMapper;
 import org.elasticsearch.index.query.QueryShardContext;
 import org.elasticsearch.index.similarity.SimilarityService;
 import org.elasticsearch.indices.InvalidTypeNameException;
 import org.elasticsearch.indices.TypeMissingException;
 import org.elasticsearch.indices.mapper.MapperRegistry;
-import org.elasticsearch.percolator.PercolatorService;
 import org.elasticsearch.script.ScriptService;
 
 import java.io.Closeable;
@@ -84,6 +84,8 @@ public class MapperService extends AbstractIndexComponent implements Closeable {
     public static final String DEFAULT_MAPPING = "_default_";
     public static final Setting<Long> INDEX_MAPPING_NESTED_FIELDS_LIMIT_SETTING =
         Setting.longSetting("index.mapping.nested_fields.limit", 50L, 0, Property.Dynamic, Property.IndexScope);
+    public static final Setting<Long> INDEX_MAPPING_TOTAL_FIELDS_LIMIT_SETTING =
+        Setting.longSetting("index.mapping.total_fields.limit", 1000L, 0, Property.Dynamic, Property.IndexScope);
     public static final boolean INDEX_MAPPER_DYNAMIC_DEFAULT = true;
     public static final Setting<Boolean> INDEX_MAPPER_DYNAMIC_SETTING =
         Setting.boolSetting("index.mapper.dynamic", INDEX_MAPPER_DYNAMIC_DEFAULT, Property.IndexScope);
@@ -283,7 +285,13 @@ public class MapperService extends AbstractIndexComponent implements Closeable {
         fullPathObjectMappers = Collections.unmodifiableMap(fullPathObjectMappers);
 
         if (reason == MergeReason.MAPPING_UPDATE) {
+            // this check will only be performed on the master node when there is
+            // a call to the update mapping API. For all other cases like
+            // the master node restoring mappings from disk or data nodes
+            // deserializing cluster state that was sent by the master node,
+            // this check will be skipped.
             checkNestedFieldsLimit(fullPathObjectMappers);
+            checkTotalFieldsLimit(objectMappers.size() + fieldMappers.size());
         }
 
         Set<String> parentTypes = this.parentTypes;
@@ -333,7 +341,7 @@ public class MapperService extends AbstractIndexComponent implements Closeable {
     }
 
     private boolean typeNameStartsWithIllegalDot(DocumentMapper mapper) {
-        return mapper.type().startsWith(".") && !PercolatorService.TYPE_NAME.equals(mapper.type());
+        return mapper.type().startsWith(".") && !PercolatorFieldMapper.TYPE_NAME.equals(mapper.type());
     }
 
     private boolean assertSerialization(DocumentMapper mapper) {
@@ -398,14 +406,21 @@ public class MapperService extends AbstractIndexComponent implements Closeable {
                 actualNestedFields++;
             }
         }
-        if (allowedNestedFields >= 0 && actualNestedFields > allowedNestedFields) {
+        if (actualNestedFields > allowedNestedFields) {
             throw new IllegalArgumentException("Limit of nested fields [" + allowedNestedFields + "] in index [" + index().getName() + "] has been exceeded");
+        }
+    }
+
+    private void checkTotalFieldsLimit(long totalMappers) {
+        long allowedTotalFields = indexSettings.getValue(INDEX_MAPPING_TOTAL_FIELDS_LIMIT_SETTING);
+        if (allowedTotalFields < totalMappers) {
+            throw new IllegalArgumentException("Limit of total fields [" + allowedTotalFields + "] in index [" + index().getName() + "] has been exceeded");
         }
     }
 
     public DocumentMapper parse(String mappingType, CompressedXContent mappingSource, boolean applyDefault) throws MapperParsingException {
         String defaultMappingSource;
-        if (PercolatorService.TYPE_NAME.equals(mappingType)) {
+        if (PercolatorFieldMapper.TYPE_NAME.equals(mappingType)) {
             defaultMappingSource = this.defaultPercolatorMappingSource;
         }  else {
             defaultMappingSource = this.defaultMappingSource;

@@ -35,7 +35,7 @@ import org.elasticsearch.index.engine.EngineConfig;
 import org.elasticsearch.index.fielddata.IndexFieldDataService;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MapperService;
-import org.elasticsearch.index.percolator.PercolatorQueriesRegistry;
+import org.elasticsearch.index.percolator.PercolatorQueryCache;
 import org.elasticsearch.index.similarity.SimilarityService;
 import org.elasticsearch.index.store.FsDirectoryService;
 import org.elasticsearch.index.store.IndexStore;
@@ -125,9 +125,10 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
         FieldMapper.IGNORE_MALFORMED_SETTING,
         FieldMapper.COERCE_SETTING,
         Store.INDEX_STORE_STATS_REFRESH_INTERVAL_SETTING,
-        PercolatorQueriesRegistry.INDEX_MAP_UNMAPPED_FIELDS_AS_STRING_SETTING,
+        PercolatorQueryCache.INDEX_MAP_UNMAPPED_FIELDS_AS_STRING_SETTING,
         MapperService.INDEX_MAPPER_DYNAMIC_SETTING,
         MapperService.INDEX_MAPPING_NESTED_FIELDS_LIMIT_SETTING,
+        MapperService.INDEX_MAPPING_TOTAL_FIELDS_LIMIT_SETTING,
         BitsetFilterCache.INDEX_LOAD_RANDOM_ACCESS_FILTERS_EAGERLY_SETTING,
         IndexModule.INDEX_STORE_TYPE_SETTING,
         IndexModule.INDEX_QUERY_CACHE_TYPE_SETTING,
@@ -135,7 +136,6 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
         PrimaryShardAllocator.INDEX_RECOVERY_INITIAL_SHARDS_SETTING,
         FsDirectoryService.INDEX_LOCK_FACTOR_SETTING,
         EngineConfig.INDEX_CODEC_SETTING,
-        IndexWarmer.INDEX_NORMS_LOADING_SETTING,
         // validate that built-in similarities don't get redefined
         Setting.groupSetting("index.similarity.", (s) -> {
             Map<String, Settings> groups = s.getAsGroups();
@@ -171,7 +171,8 @@ public final class IndexScopedSettings extends AbstractScopedSettings {
         super.validateSettingKey(setting);
     }
 
-    public boolean isPrivateSetting(String key) {
+    @Override
+    protected final boolean isPrivateSetting(String key) {
         switch (key) {
             case IndexMetaData.SETTING_CREATION_DATE:
             case IndexMetaData.SETTING_INDEX_UUID:

@@ -19,6 +19,7 @@
 
 package org.elasticsearch.indices;
 
+import com.carrotsearch.hppc.cursors.ObjectCursor;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.store.LockObtainFailedException;
 import org.apache.lucene.util.CollectionUtil;
@@ -30,10 +31,11 @@ import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags.Flag;
 import org.elasticsearch.action.admin.indices.stats.IndexShardStats;
 import org.elasticsearch.action.admin.indices.stats.ShardStats;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.cluster.metadata.MappingMetaData;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.breaker.CircuitBreaker;
 import org.elasticsearch.common.bytes.BytesReference;
@@ -62,10 +64,10 @@ import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.NodeServicesProvider;
 import org.elasticsearch.index.analysis.AnalysisRegistry;
 import org.elasticsearch.index.cache.request.ShardRequestCache;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.fielddata.IndexFieldDataCache;
 import org.elasticsearch.index.flush.FlushStats;
 import org.elasticsearch.index.get.GetStats;
+import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.merge.MergeStats;
 import org.elasticsearch.index.recovery.RecoveryStats;
 import org.elasticsearch.index.refresh.RefreshStats;
@@ -74,6 +76,7 @@ import org.elasticsearch.index.shard.IllegalIndexShardStateException;
 import org.elasticsearch.index.shard.IndexEventListener;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.shard.IndexShardState;
+import org.elasticsearch.index.shard.IndexingOperationListener;
 import org.elasticsearch.index.shard.IndexingStats;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.index.store.IndexStoreConfig;
@@ -88,12 +91,13 @@ import org.elasticsearch.search.query.QueryPhase;
 import org.elasticsearch.search.query.QuerySearchResult;
 import org.elasticsearch.threadpool.ThreadPool;
 
+import java.io.Closeable;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.EnumSet;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
@@ -172,7 +176,7 @@ public class IndicesService extends AbstractLifecycleComponent<IndicesService> i
         this.circuitBreakerService = circuitBreakerService;
         this.indicesFieldDataCache = new IndicesFieldDataCache(settings, new IndexFieldDataCache.Listener() {
             @Override
-            public void onRemoval(ShardId shardId, String fieldName, FieldDataType fieldDataType, boolean wasEvicted, long sizeInBytes) {
+            public void onRemoval(ShardId shardId, String fieldName, boolean wasEvicted, long sizeInBytes) {
                 assert sizeInBytes >= 0 : "When reducing circuit breaker, it should be adjusted with a number higher or equal to 0 and not [" + sizeInBytes + "]";
                 circuitBreakerService.getBreaker(CircuitBreaker.FIELDDATA).addWithoutBreaking(-sizeInBytes);
             }
@@ -265,7 +269,7 @@ public class IndicesService extends AbstractLifecycleComponent<IndicesService> i
                     if (indexShard.routingEntry() == null) {
                         continue;
                     }
-                    IndexShardStats indexShardStats = new IndexShardStats(indexShard.shardId(), new ShardStats[] { new ShardStats(indexShard.routingEntry(), indexShard.shardPath(), new CommonStats(indicesQueryCache, indexShard, flags), indexShard.commitStats()) });
+                    IndexShardStats indexShardStats = new IndexShardStats(indexShard.shardId(), new ShardStats[] { new ShardStats(indexShard.routingEntry(), indexShard.shardPath(), new CommonStats(indicesQueryCache, indexService.cache().getPercolatorQueryCache(), indexShard, flags), indexShard.commitStats()) });
                     if (!statsByShard.containsKey(indexService.index())) {
                         statsByShard.put(indexService.index(), arrayAsArrayList(indexShardStats));
                     } else {
@@ -325,6 +329,7 @@ public class IndicesService extends AbstractLifecycleComponent<IndicesService> i
      * @throws IndexAlreadyExistsException if the index already exists.
      */
     public synchronized IndexService createIndex(final NodeServicesProvider nodeServicesProvider, IndexMetaData indexMetaData, List<IndexEventListener> builtInListeners) throws IOException {
+
         if (!lifecycle.started()) {
             throw new IllegalStateException("Can't create an index [" + indexMetaData.getIndex() + "], node is closed");
         }
@@ -332,37 +337,22 @@ public class IndicesService extends AbstractLifecycleComponent<IndicesService> i
             throw new IllegalArgumentException("index must have a real UUID found value: [" + indexMetaData.getIndexUUID() + "]");
         }
         final Index index = indexMetaData.getIndex();
-        final Predicate<String> indexNameMatcher = (indexExpression) -> indexNameExpressionResolver.matchesIndex(index.getName(), indexExpression, clusterService.state());
-        final IndexSettings idxSettings = new IndexSettings(indexMetaData, this.settings, indexNameMatcher, indexScopeSetting);
         if (hasIndex(index)) {
             throw new IndexAlreadyExistsException(index);
         }
-        logger.debug("creating Index [{}], shards [{}]/[{}{}]",
-                indexMetaData.getIndex(),
-                idxSettings.getNumberOfShards(),
-                idxSettings.getNumberOfReplicas(),
-                idxSettings.isShadowReplicaIndex() ? "s" : "");
-
-        final IndexModule indexModule = new IndexModule(idxSettings, indexStoreConfig, analysisRegistry);
-        pluginsService.onIndexModule(indexModule);
-        for (IndexEventListener listener : builtInListeners) {
-            indexModule.addIndexEventListener(listener);
-        }
+        List<IndexEventListener> finalListeners = new ArrayList<>(builtInListeners);
         final IndexEventListener onStoreClose = new IndexEventListener() {
             @Override
             public void onStoreClosed(ShardId shardId) {
                 indicesQueryCache.onClose(shardId);
             }
         };
-        indexModule.addIndexEventListener(onStoreClose);
-        indexModule.addIndexEventListener(oldShardsStats);
-        final IndexEventListener listener = indexModule.freeze();
-        listener.beforeIndexCreated(index, idxSettings.getSettings());
-        final IndexService indexService = indexModule.newIndexService(nodeEnv, this, nodeServicesProvider, indicesQueryCache, mapperRegistry, indicesFieldDataCache, indexingMemoryController);
+        finalListeners.add(onStoreClose);
+        finalListeners.add(oldShardsStats);
+        final IndexService indexService = createIndexService("create index", nodeServicesProvider, indexMetaData, indicesQueryCache, indicesFieldDataCache, finalListeners, indexingMemoryController);
         boolean success = false;
         try {
-            assert indexService.getIndexEventListener() == listener;
-            listener.afterIndexCreated(indexService);
+            indexService.getIndexEventListener().afterIndexCreated(indexService);
             indices = newMapBuilder(indices).put(index.getUUID(), indexService).immutableMap();
             success = true;
             return indexService;
@@ -371,7 +361,54 @@ public class IndicesService extends AbstractLifecycleComponent<IndicesService> i
                 indexService.close("plugins_failed", true);
             }
         }
+    }
 
+    /**
+     * This creates a new IndexService without registering it
+     */
+    private synchronized IndexService createIndexService(final String reason, final NodeServicesProvider nodeServicesProvider, IndexMetaData indexMetaData, IndicesQueryCache indicesQueryCache, IndicesFieldDataCache indicesFieldDataCache, List<IndexEventListener> builtInListeners, IndexingOperationListener... indexingOperationListeners) throws IOException {
+        final Index index = indexMetaData.getIndex();
+        final Predicate<String> indexNameMatcher = (indexExpression) -> indexNameExpressionResolver.matchesIndex(index.getName(), indexExpression, clusterService.state());
+        final IndexSettings idxSettings = new IndexSettings(indexMetaData, this.settings, indexNameMatcher, indexScopeSetting);
+        logger.debug("creating Index [{}], shards [{}]/[{}{}] - reason [{}]",
+            indexMetaData.getIndex(),
+            idxSettings.getNumberOfShards(),
+            idxSettings.getNumberOfReplicas(),
+            idxSettings.isShadowReplicaIndex() ? "s" : "", reason);
+
+        final IndexModule indexModule = new IndexModule(idxSettings, indexStoreConfig, analysisRegistry);
+        pluginsService.onIndexModule(indexModule);
+        for (IndexEventListener listener : builtInListeners) {
+            indexModule.addIndexEventListener(listener);
+        }
+        final IndexEventListener listener = indexModule.freeze();
+        listener.beforeIndexCreated(index, idxSettings.getSettings());
+        return indexModule.newIndexService(nodeEnv, this, nodeServicesProvider, indicesQueryCache, mapperRegistry, indicesFieldDataCache, indexingOperationListeners);
+    }
+
+    /**
+     * This method verifies that the given {@link IndexMetaData} holds sane values to create an {@link IndexService}. This method will throw an
+     * exception if the creation fails. The created {@link IndexService} will not be registered and will be closed immediately.
+     */
+    public synchronized void verifyIndexMetadata(final NodeServicesProvider nodeServicesProvider, IndexMetaData metaData) throws IOException {
+        final List<Closeable> closeables = new ArrayList<>();
+        try {
+            IndicesFieldDataCache indicesFieldDataCache = new IndicesFieldDataCache(settings, new IndexFieldDataCache.Listener() {});
+            closeables.add(indicesFieldDataCache);
+            IndicesQueryCache indicesQueryCache = new IndicesQueryCache(settings);
+            closeables.add(indicesQueryCache);
+            // this will also fail if some plugin fails etc. which is nice since we can verify that early
+            final IndexService service = createIndexService("metadata verification", nodeServicesProvider,
+                metaData, indicesQueryCache, indicesFieldDataCache, Collections.emptyList());
+            for (ObjectCursor<MappingMetaData> typeMapping : metaData.getMappings().values()) {
+                // don't apply the default mapping, it has been applied when the mapping was created
+                service.mapperService().merge(typeMapping.value.type(), typeMapping.value.source(),
+                    MapperService.MergeReason.MAPPING_RECOVERY, true);
+            }
+            closeables.add(() -> service.close("metadata verification", false));
+        } finally {
+            IOUtils.close(closeables);
+        }
     }
 
     /**

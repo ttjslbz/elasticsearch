@@ -38,13 +38,12 @@ import org.elasticsearch.index.flush.FlushStats;
 import org.elasticsearch.index.get.GetStats;
 import org.elasticsearch.index.shard.IndexingStats;
 import org.elasticsearch.index.merge.MergeStats;
-import org.elasticsearch.index.percolator.PercolateStats;
+import org.elasticsearch.index.percolator.PercolatorQueryCacheStats;
 import org.elasticsearch.index.recovery.RecoveryStats;
 import org.elasticsearch.index.refresh.RefreshStats;
 import org.elasticsearch.index.search.stats.SearchStats;
 import org.elasticsearch.index.shard.DocsStats;
 import org.elasticsearch.index.store.StoreStats;
-import org.elasticsearch.index.suggest.stats.SuggestStats;
 import org.elasticsearch.search.suggest.completion.CompletionStats;
 
 import java.io.IOException;
@@ -105,8 +104,8 @@ public class NodeIndicesStats implements Streamable, ToXContent {
     }
 
     @Nullable
-    public PercolateStats getPercolate() {
-        return stats.getPercolate();
+    public PercolatorQueryCacheStats getPercolate() {
+        return stats.getPercolatorCache();
     }
 
     @Nullable
@@ -147,11 +146,6 @@ public class NodeIndicesStats implements Streamable, ToXContent {
     @Nullable
     public SegmentsStats getSegments() {
         return stats.getSegments();
-    }
-
-    @Nullable
-    public SuggestStats getSuggest() {
-        return stats.getSuggest();
     }
 
     @Nullable

@@ -614,7 +614,8 @@ final class DocumentParser implements Closeable {
         } else if (fieldType instanceof TextFieldType) {
             builder = context.root().findTemplateBuilder(context, currentFieldName, "text", "string");
             if (builder == null) {
-                builder = new TextFieldMapper.Builder(currentFieldName);
+                builder = new TextFieldMapper.Builder(currentFieldName)
+                        .addMultiField(new KeywordFieldMapper.Builder("keyword").ignoreAbove(256));
             }
         } else if (fieldType instanceof KeywordFieldType) {
             builder = context.root().findTemplateBuilder(context, currentFieldName, "keyword", "string");
@@ -705,7 +706,7 @@ final class DocumentParser implements Closeable {
                     Double.parseDouble(text);
                     Mapper.Builder builder = context.root().findTemplateBuilder(context, currentFieldName, "double");
                     if (builder == null) {
-                        builder = new DoubleFieldMapper.Builder(currentFieldName);
+                        builder = new FloatFieldMapper.Builder(currentFieldName);
                     }
                     return builder;
                 } catch (NumberFormatException e) {
@@ -714,7 +715,8 @@ final class DocumentParser implements Closeable {
             }
             Mapper.Builder builder = context.root().findTemplateBuilder(context, currentFieldName, "string");
             if (builder == null) {
-                builder = new TextFieldMapper.Builder(currentFieldName);
+                builder = new TextFieldMapper.Builder(currentFieldName)
+                        .addMultiField(new KeywordFieldMapper.Builder("keyword").ignoreAbove(256));
             }
             return builder;
         } else if (token == XContentParser.Token.VALUE_NUMBER) {

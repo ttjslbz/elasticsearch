@@ -26,10 +26,10 @@ import org.elasticsearch.action.admin.cluster.node.tasks.list.TaskInfo;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.tasks.TransportTasksAction;
 import org.elasticsearch.cluster.ClusterName;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.node.DiscoveryNode;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -84,7 +84,7 @@ public class TransportCancelTasksAction extends TransportTasksAction<Cancellable
     }
 
     protected void processTasks(CancelTasksRequest request, Consumer<CancellableTask> operation) {
-        if (request.getTaskId().isSet() == false) {
+        if (request.getTaskId().isSet()) {
             // we are only checking one task, we can optimize it
             CancellableTask task = taskManager.getCancellableTask(request.getTaskId().getId());
             if (task != null) {

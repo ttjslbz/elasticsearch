@@ -57,7 +57,6 @@ import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.client.AdminClient;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
@@ -69,6 +68,7 @@ import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.UnassignedInfo;
 import org.elasticsearch.cluster.routing.allocation.decider.DiskThresholdDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.EnableAllocationDecider;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.Strings;
@@ -100,19 +100,18 @@ import org.elasticsearch.env.Environment;
 import org.elasticsearch.index.Index;
 import org.elasticsearch.index.IndexModule;
 import org.elasticsearch.index.IndexService;
-import org.elasticsearch.index.MockEngineFactoryPlugin;
 import org.elasticsearch.index.IndexSettings;
-import org.elasticsearch.index.codec.CodecService;
-import org.elasticsearch.index.mapper.DocumentMapper;
-import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.MappedFieldType.Loading;
-import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
+import org.elasticsearch.index.IndexWarmer;
 import org.elasticsearch.index.MergePolicyConfig;
 import org.elasticsearch.index.MergeSchedulerConfig;
+import org.elasticsearch.index.MockEngineFactoryPlugin;
+import org.elasticsearch.index.codec.CodecService;
+import org.elasticsearch.index.mapper.DocumentMapper;
+import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
 import org.elasticsearch.index.translog.Translog;
 import org.elasticsearch.indices.IndicesService;
-import org.elasticsearch.index.IndexWarmer;
 import org.elasticsearch.indices.IndicesRequestCache;
+import org.elasticsearch.indices.IndicesService;
 import org.elasticsearch.indices.store.IndicesStore;
 import org.elasticsearch.node.NodeMocksPlugin;
 import org.elasticsearch.plugins.Plugin;
@@ -359,10 +358,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
         }
     }
 
-    private Loading randomLoadingValues() {
-        return randomFrom(Loading.values());
-    }
-
     /**
      * Creates a randomized index template. This template is used to pass in randomized settings on a
      * per index basis. Allows to enable/disable the randomization for number of shards and replicas
@@ -398,58 +393,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
                             .field("enabled", randomBoolean());
                     mappings.endObject();
                 }
-                mappings.startArray("dynamic_templates")
-                        .startObject()
-                        .startObject("template-strings")
-                        .field("match_mapping_type", "string")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomLoadingValues())
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-longs")
-                        .field("match_mapping_type", "long")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-doubles")
-                        .field("match_mapping_type", "double")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-geo_points")
-                        .field("match_mapping_type", "geo_point")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-booleans")
-                        .field("match_mapping_type", "boolean")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endArray();
                 mappings.endObject().endObject();
             }
 
@@ -481,7 +424,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
     protected Settings.Builder setRandomIndexSettings(Random random, Settings.Builder builder) {
         setRandomIndexMergeSettings(random, builder);
         setRandomIndexTranslogSettings(random, builder);
-        setRandomIndexNormsLoading(random, builder);
 
         if (random.nextBoolean()) {
             builder.put(MergeSchedulerConfig.AUTO_THROTTLE_SETTING.getKey(), false);
@@ -517,13 +459,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
                 break;
         }
 
-        return builder;
-    }
-
-    private static Settings.Builder setRandomIndexNormsLoading(Random random, Settings.Builder builder) {
-        if (random.nextBoolean()) {
-            builder.put(IndexWarmer.INDEX_NORMS_LOADING_SETTING.getKey(), RandomPicks.randomFrom(random, Arrays.asList(MappedFieldType.Loading.EAGER, MappedFieldType.Loading.LAZY)));
-        }
         return builder;
     }
 

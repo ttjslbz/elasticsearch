@@ -19,6 +19,8 @@
 
 package org.elasticsearch.action;
 
+import org.elasticsearch.action.admin.cluster.allocation.ClusterAllocationExplainAction;
+import org.elasticsearch.action.admin.cluster.allocation.TransportClusterAllocationExplainAction;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthAction;
 import org.elasticsearch.action.admin.cluster.health.TransportClusterHealthAction;
 import org.elasticsearch.action.admin.cluster.node.hotthreads.NodesHotThreadsAction;
@@ -165,7 +167,6 @@ import org.elasticsearch.action.percolate.MultiPercolateAction;
 import org.elasticsearch.action.percolate.PercolateAction;
 import org.elasticsearch.action.percolate.TransportMultiPercolateAction;
 import org.elasticsearch.action.percolate.TransportPercolateAction;
-import org.elasticsearch.action.percolate.TransportShardMultiPercolateAction;
 import org.elasticsearch.action.search.ClearScrollAction;
 import org.elasticsearch.action.search.MultiSearchAction;
 import org.elasticsearch.action.search.SearchAction;
@@ -174,8 +175,6 @@ import org.elasticsearch.action.search.TransportClearScrollAction;
 import org.elasticsearch.action.search.TransportMultiSearchAction;
 import org.elasticsearch.action.search.TransportSearchAction;
 import org.elasticsearch.action.search.TransportSearchScrollAction;
-import org.elasticsearch.action.suggest.SuggestAction;
-import org.elasticsearch.action.suggest.TransportSuggestAction;
 import org.elasticsearch.action.support.ActionFilter;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.AutoCreateIndex;
@@ -266,6 +265,7 @@ public class ActionModule extends AbstractModule {
         registerAction(ListTasksAction.INSTANCE, TransportListTasksAction.class);
         registerAction(CancelTasksAction.INSTANCE, TransportCancelTasksAction.class);
 
+        registerAction(ClusterAllocationExplainAction.INSTANCE, TransportClusterAllocationExplainAction.class);
         registerAction(ClusterStatsAction.INSTANCE, TransportClusterStatsAction.class);
         registerAction(ClusterStateAction.INSTANCE, TransportClusterStateAction.class);
         registerAction(ClusterHealthAction.INSTANCE, TransportClusterHealthAction.class);
@@ -321,7 +321,6 @@ public class ActionModule extends AbstractModule {
         registerAction(MultiTermVectorsAction.INSTANCE, TransportMultiTermVectorsAction.class,
                 TransportShardMultiTermsVectorAction.class);
         registerAction(DeleteAction.INSTANCE, TransportDeleteAction.class);
-        registerAction(SuggestAction.INSTANCE, TransportSuggestAction.class);
         registerAction(UpdateAction.INSTANCE, TransportUpdateAction.class);
         registerAction(MultiGetAction.INSTANCE, TransportMultiGetAction.class,
                 TransportShardMultiGetAction.class);
@@ -331,7 +330,7 @@ public class ActionModule extends AbstractModule {
         registerAction(SearchScrollAction.INSTANCE, TransportSearchScrollAction.class);
         registerAction(MultiSearchAction.INSTANCE, TransportMultiSearchAction.class);
         registerAction(PercolateAction.INSTANCE, TransportPercolateAction.class);
-        registerAction(MultiPercolateAction.INSTANCE, TransportMultiPercolateAction.class, TransportShardMultiPercolateAction.class);
+        registerAction(MultiPercolateAction.INSTANCE, TransportMultiPercolateAction.class);
         registerAction(ExplainAction.INSTANCE, TransportExplainAction.class);
         registerAction(ClearScrollAction.INSTANCE, TransportClearScrollAction.class);
         registerAction(RecoveryAction.INSTANCE, TransportRecoveryAction.class);

@@ -19,11 +19,9 @@
 
 package org.elasticsearch.tribe;
 
-import com.carrotsearch.hppc.cursors.ObjectObjectCursor;
 import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.support.master.TransportMasterNodeReadAction;
 import org.elasticsearch.cluster.ClusterChangedEvent;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.ClusterStateListener;
 import org.elasticsearch.cluster.ClusterStateTaskConfig;
@@ -37,6 +35,7 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.node.DiscoveryNodes;
 import org.elasticsearch.cluster.routing.IndexRoutingTable;
 import org.elasticsearch.cluster.routing.RoutingTable;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.component.AbstractLifecycleComponent;
@@ -55,7 +54,6 @@ import org.elasticsearch.env.Environment;
 import org.elasticsearch.gateway.GatewayService;
 import org.elasticsearch.node.Node;
 import org.elasticsearch.rest.RestStatus;
-import org.elasticsearch.transport.TransportService;
 import org.elasticsearch.transport.TransportSettings;
 
 import java.util.Arrays;
@@ -113,7 +111,9 @@ public class TribeService extends AbstractLifecycleComponent<TribeService> {
         }
         // its a tribe configured node..., force settings
         Settings.Builder sb = Settings.builder().put(settings);
-        sb.put(Node.NODE_CLIENT_SETTING.getKey(), true); // this node should just act as a node client
+        sb.put(Node.NODE_MASTER_SETTING.getKey(), false);
+        sb.put(Node.NODE_DATA_SETTING.getKey(), false);
+        sb.put(Node.NODE_INGEST_SETTING.getKey(), false);
         sb.put(DiscoveryModule.DISCOVERY_TYPE_SETTING.getKey(), "local"); // a tribe node should not use zen discovery
         // nothing is going to be discovered, since no master will be elected
         sb.put(DiscoverySettings.INITIAL_STATE_TIMEOUT_SETTING.getKey(), 0);
@@ -237,7 +237,9 @@ public class TribeService extends AbstractLifecycleComponent<TribeService> {
         if (sb.get(NetworkModule.HTTP_ENABLED.getKey()) == null) {
             sb.put(NetworkModule.HTTP_ENABLED.getKey(), false);
         }
-        sb.put(Node.NODE_CLIENT_SETTING.getKey(), true);
+        sb.put(Node.NODE_DATA_SETTING.getKey(), false);
+        sb.put(Node.NODE_MASTER_SETTING.getKey(), false);
+        sb.put(Node.NODE_INGEST_SETTING.getKey(), false);
         return sb.build();
     }
 
@@ -349,7 +351,7 @@ public class TribeService extends AbstractLifecycleComponent<TribeService> {
             // -- merge nodes
             // go over existing nodes, and see if they need to be removed
             for (DiscoveryNode discoNode : currentState.nodes()) {
-                String markedTribeName = discoNode.attributes().get(TRIBE_NAME_SETTING.getKey());
+                String markedTribeName = discoNode.getAttributes().get(TRIBE_NAME_SETTING.getKey());
                 if (markedTribeName != null && markedTribeName.equals(tribeName)) {
                     if (tribeState.nodes().get(discoNode.id()) == null) {
                         clusterStateChanged = true;
@@ -362,13 +364,10 @@ public class TribeService extends AbstractLifecycleComponent<TribeService> {
             for (DiscoveryNode tribe : tribeState.nodes()) {
                 if (currentState.nodes().get(tribe.id()) == null) {
                     // a new node, add it, but also add the tribe name to the attributes
-                    Map<String, String> tribeAttr = new HashMap<>();
-                    for (ObjectObjectCursor<String, String> attr : tribe.attributes()) {
-                        tribeAttr.put(attr.key, attr.value);
-                    }
+                    Map<String, String> tribeAttr = new HashMap<>(tribe.getAttributes());
                     tribeAttr.put(TRIBE_NAME_SETTING.getKey(), tribeName);
                     DiscoveryNode discoNode = new DiscoveryNode(tribe.name(), tribe.id(), tribe.getHostName(), tribe.getHostAddress(),
-                            tribe.address(), unmodifiableMap(tribeAttr), tribe.version());
+                            tribe.address(), unmodifiableMap(tribeAttr), tribe.getRoles(), tribe.version());
                     clusterStateChanged = true;
                     logger.info("[{}] adding node [{}]", tribeName, discoNode);
                     nodes.put(discoNode);

@@ -63,7 +63,6 @@ import org.elasticsearch.indices.IndexTemplateAlreadyExistsException;
 import org.elasticsearch.indices.IndexTemplateMissingException;
 import org.elasticsearch.indices.InvalidIndexTemplateException;
 import org.elasticsearch.indices.recovery.RecoverFilesRecoveryException;
-import org.elasticsearch.percolator.PercolateException;
 import org.elasticsearch.repositories.RepositoryException;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.rest.action.admin.indices.alias.delete.AliasesNotFoundException;
@@ -104,6 +103,8 @@ import java.util.Set;
 
 import static java.lang.reflect.Modifier.isAbstract;
 import static java.lang.reflect.Modifier.isInterface;
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.emptySet;
 import static java.util.Collections.singleton;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 
@@ -382,19 +383,6 @@ public class ExceptionSerializationTests extends ESTestCase {
         assertEquals(id, ex.id());
     }
 
-    public void testPercolateException() throws IOException {
-        ShardId id = new ShardId("foo", "_na_", 1);
-        PercolateException ex = serialize(new PercolateException(id, "percolate my ass", null));
-        assertEquals(id, ex.getShardId());
-        assertEquals("percolate my ass", ex.getMessage());
-        assertNull(ex.getCause());
-
-        ex = serialize(new PercolateException(id, "percolate my ass", new NullPointerException()));
-        assertEquals(id, ex.getShardId());
-        assertEquals("percolate my ass", ex.getMessage());
-        assertTrue(ex.getCause() instanceof NullPointerException);
-    }
-
     public void testRoutingValidationException() throws IOException {
         RoutingTableValidation validation = new RoutingTableValidation();
         validation.addIndexFailure("foo", "bar");
@@ -457,7 +445,8 @@ public class ExceptionSerializationTests extends ESTestCase {
     }
 
     public void testConnectTransportException() throws IOException {
-        DiscoveryNode node = new DiscoveryNode("thenode", new LocalTransportAddress("dead.end:666"), Version.CURRENT);
+        DiscoveryNode node = new DiscoveryNode("thenode", new LocalTransportAddress("dead.end:666"),
+                emptyMap(), emptySet(), Version.CURRENT);
         ConnectTransportException ex = serialize(new ConnectTransportException(node, "msg", "action", null));
         assertEquals("[][local[dead.end:666]][action] msg", ex.getMessage());
         assertEquals(node, ex.node());
@@ -746,7 +735,6 @@ public class ExceptionSerializationTests extends ESTestCase {
         ids.put(85, org.elasticsearch.index.AlreadyExpiredException.class);
         ids.put(86, org.elasticsearch.search.aggregations.AggregationExecutionException.class);
         ids.put(88, org.elasticsearch.indices.InvalidIndexTemplateException.class);
-        ids.put(89, org.elasticsearch.percolator.PercolateException.class);
         ids.put(90, org.elasticsearch.index.engine.RefreshFailedEngineException.class);
         ids.put(91, org.elasticsearch.search.aggregations.AggregationInitializationException.class);
         ids.put(92, org.elasticsearch.indices.recovery.DelayRecoveryException.class);
